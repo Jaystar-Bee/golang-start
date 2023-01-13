@@ -1,0 +1,125 @@
+{
+  "consumes": [
+    "application/json"
+  ],
+  "produces": [
+    "application/json"
+  ],
+  "schemes": [
+    "http"
+  ],
+  "swagger": "2.0",
+  "info": {
+    "description": "This is a sample recipes API. You can find out more about the API at https://github.com/PacktPublishing/Building-Distributed-Applications-in-Gin.",
+    "title": "Recipe API",
+    "version": "1.0.0"
+  },
+  "host": "localhost:3000",
+  "basePath": "/api/v1/recipes",
+  "paths": {
+    "/recipes": {
+      "get": {
+        "description": "This will show all available recipes.",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "recipes"
+        ],
+        "summary": "Get all recipes",
+        "operationId": "getAllRecipes",
+        "responses": {}
+      },
+      "post": {
+        "description": "Create a new recipe",
+        "consumes": [
+          "application/json"
+        ],
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "recipes"
+        ],
+        "operationId": "newRecipe",
+        "responses": {}
+      }
+    },
+    "/recipes/search": {
+      "get": {
+        "description": "Get a recipe by tag",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "recipes"
+        ],
+        "operationId": "searchRecipe",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "Tag of the recipe",
+            "name": "tag",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "description": "Tag of the recipe",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {}
+      }
+    },
+    "/recipes/{id}": {
+      "put": {
+        "description": "Update a recipe",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "recipes"
+        ],
+        "operationId": "updateRecipe",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "ID of the recipe to update",
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "ID of the recipe to update",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {}
+      },
+      "delete": {
+        "description": "Delete a recipe",
+        "produces": [
+          "application/json"
+        ],
+        "tags": [
+          "recipes"
+        ],
+        "operationId": "deleteRecipe",
+        "parameters": [
+          {
+            "type": "string",
+            "description": "ID of the recipe",
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "description": "ID of the recipe",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {}
+      }
+    }
+  }
+}
