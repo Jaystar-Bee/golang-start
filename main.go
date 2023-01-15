@@ -25,7 +25,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -79,7 +78,7 @@ func main() {
 	recipes.POST("", newRecipeHandler)
 	recipes.GET("", getAllRecipesHandler)
 	recipes.PUT("/:id", updateRecipeHandler)
-	// recipes.DELETE("/:id", deleteRecipeHandler)
+	recipes.DELETE("/:id", deleteRecipeHandler)
 	recipes.GET("/search", searchRecipeHandler)
 
 
@@ -137,7 +136,6 @@ func main() {
 //   '200': 
 //	recipes: []Recipe
 	func getAllRecipesHandler(c *gin.Context) {
-		// collection := client.Database(os.Getenv("MONGO_DATABASE")).Collection("recipes")
 		cur, err := collection.Find(ctx, bson.M{})
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
@@ -226,12 +224,30 @@ func main() {
 
 	func deleteRecipeHandler(c *gin.Context) {
 		id := c.Param("id")
-		objectId, _:= primitive.ObjectIDFromHex(id)
-		
-		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{
-			"error": "Recipe not found",
+		objectId, err:= primitive.ObjectIDFromHex(id)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"error": err.Error(),
+			})
+		}
+
+		res, err := collection.DeleteOne(ctx, bson.M{"_id": objectId})
+
+		if err != nil {
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"error": "Error deleting recipe",
 		})
+		return
+
 	}
+		if res.DeletedCount == 0 {
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{
+				"error": "Recipe not found",
+			})
+			return
+		}
+		c.JSON(http.StatusOK, res)
+}
 
 // swagger:route GET /recipes/search recipes searchRecipe
 //
@@ -253,25 +269,20 @@ func main() {
 	func searchRecipeHandler(c *gin.Context) {
 		tag := c.Query("tag")
 		listOfRecipes := make([]Recipe, 0)
+		res, err := collection.Find(ctx, bson.D{{"tags", bson.D{{"$in", bson.A{tag}}}}})
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+				"error": err.Error(),
+			})
+			return;
+		}
+		defer res.Close(ctx)
 
-		for _, recipe := range recipes {
-			found := false
-			for _, t := range recipe.Tags {
-				if strings.EqualFold(t, tag) {
-					found = true
-					break
-				}
-			}
-			if found {
-				listOfRecipes = append(listOfRecipes, recipe)
-			}
+		for res.Next(ctx){
+			var recipe Recipe
+			res.Decode(&recipe)
+			listOfRecipes = append(listOfRecipes, recipe)
 		}
-		if len(listOfRecipes) < 1 {
-		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{
-			"error": "Recipe not found",
-		})
-		return
-		}
-		c.JSON(http.StatusOK, listOfRecipes)
+		c.JSON(http.StatusOK, recipes)
 	}
 	
