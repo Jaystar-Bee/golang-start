@@ -20,32 +20,57 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
-	"io/ioutil"
+	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/rs/xid"
+	"github.com/joho/godotenv"
+
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
+
+// Database
+var ctx context.Context
+var err error
+var collection *mongo.Collection
+var client *mongo.Client
 
 const PORT = ":3000"
 var recipes []Recipe;
 type Recipe struct {
-	ID				string		`json:"id"`
-	Name 			string 		`json:"name"`
-	Tags 			[]string 	`json:"tags"`
-	Ingredients 	[]string 	`json:"ingredients"`
-	Instructions 	[]string 	`json:"instructions"`
-	PublishedAt 	time.Time 	`json:"publishedAt"`
+	ID				primitive.ObjectID		`json:"id" bson:"_id"`
+	Name 			string 					`json:"name" bson:"name"`
+	Tags 			[]string 				`json:"tags" bson:"tags"`
+	Ingredients 	[]string 				`json:"ingredients" bson:"ingredients"`
+	Instructions 	[]string 				`json:"instructions" bson:"instructions"`
+	PublishedAt 	time.Time 				`json:"publishedAt" bson:"publishedAt"`
 };
-	func init(){
-	recipes = make([]Recipe,0 )
-	file, _ := ioutil.ReadFile("recipes.json")
-	_ = json.Unmarshal([]byte(file), &recipes);
+
+func init(){
+	err = godotenv.Load()
+	ctx := context.Background()
+	client, err := mongo.Connect(ctx, options.Client().ApplyURI(os.Getenv("MONGO_URI")))
+	if err != nil {
+		log.Fatal(err)
+		return 
 	}
+	if err = client.Ping(context.TODO(), readpref.Primary()); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Connected to MongoDB")
+	collection = client.Database(os.Getenv("MONGO_DATABASE")).Collection("recipes")
+}
+
+
 // MAIN FUNCTION
 func main() {
 	router := gin.Default()
@@ -54,7 +79,7 @@ func main() {
 	recipes.POST("", newRecipeHandler)
 	recipes.GET("", getAllRecipesHandler)
 	recipes.PUT("/:id", updateRecipeHandler)
-	recipes.DELETE("/:id", deleteRecipeHandler)
+	// recipes.DELETE("/:id", deleteRecipeHandler)
 	recipes.GET("/search", searchRecipeHandler)
 
 
@@ -75,22 +100,28 @@ func main() {
 //   '200': Recipe
 //   '400':
 //   description: Bad request
-	func newRecipeHandler(ctx *gin.Context) {
+	func newRecipeHandler(c *gin.Context) {
 		var recipe Recipe
 
-		err := ctx.ShouldBindJSON(&recipe);
+		err := c.ShouldBindJSON(&recipe);
 		if err != nil {
-			ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
 				"error": err.Error(),
 			})
 			return
 		}
 
-		recipe.ID = xid.New().String()
+		recipe.ID = primitive.NewObjectID()
 		recipe.PublishedAt = time.Now()
-		recipes = append(recipes, recipe)
+		_, err = collection.InsertOne(ctx, recipe)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": err.Error(),
+			})
+			return 
+		}
 
-		ctx.JSON(http.StatusOK, recipe)
+		c.JSON(http.StatusOK, recipe)
 	}
 
 // swagger:route GET /recipes recipes getAllRecipes
@@ -105,13 +136,24 @@ func main() {
 // Responses:
 //   '200': 
 //	recipes: []Recipe
-	func getAllRecipesHandler(ctx *gin.Context) {
-		if len(recipes) < 1 {
-			ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{
-				"error": "Recipe not found",})
-				return
-			}
-		ctx.JSON(http.StatusOK, recipes)
+	func getAllRecipesHandler(c *gin.Context) {
+		// collection := client.Database(os.Getenv("MONGO_DATABASE")).Collection("recipes")
+		cur, err := collection.Find(ctx, bson.M{})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error": err.Error(),
+			})
+			return 
+		}
+		defer cur.Close(ctx)
+		recipes := make([]Recipe, 0)
+
+		for cur.Next(ctx){
+			var recipe Recipe
+			cur.Decode(&recipe)
+			recipes = append(recipes, recipe)
+		}
+		c.JSON(http.StatusOK, recipes)
 	}
 
 // swagger:route PUT /recipes/{id} recipes updateRecipe
@@ -133,27 +175,35 @@ func main() {
 //   description: Bad request
 //   '404':
 //   description: Recipe not found
-	func updateRecipeHandler(ctx *gin.Context) {
-		id := ctx.Param("id")
+	func updateRecipeHandler(c *gin.Context) {
+		id := c.Param("id")
 		var recipe Recipe
-		err := ctx.ShouldBindJSON(&recipe)
+		err := c.ShouldBindJSON(&recipe)
 		if err != nil {
-			ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{
 				"error": err.Error(),
 			})
 			return
 		}
 
-		for index, reci := range recipes {
-			if reci.ID == id {
-				recipes[index] = recipe;
-				ctx.JSON(http.StatusOK, recipe)
-				return
+		objectId, _ := primitive.ObjectIDFromHex(id)
+		cur, err := collection.UpdateOne(ctx, bson.M{
+			"_id": objectId,
+			}, bson.D{{"$set", bson.D{
+					{"name", recipe.Name},
+					{"instructions", recipe.Instructions},
+					{"ingredients", recipe.Ingredients},
+					{"tags", recipe.Tags},
+				}}})
+
+			if err != nil{
+				c.JSON(http.StatusInternalServerError, gin.H{
+					"error": err.Error(),
+				})
+				return;
 			}
-		}
-		ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{
-			"error": "Recipe not found",
-		})
+		fmt.Println("", cur)
+		c.JSON(http.StatusOK, recipe)
 	}
 // delete a recipe by id
 // swagger:route DELETE /recipes/{id} recipes deleteRecipe
@@ -174,16 +224,11 @@ func main() {
 //   '404':
 //   description: Recipe not found
 
-	func deleteRecipeHandler(ctx *gin.Context) {
-		id := ctx.Param("id")
-		for index, recipe := range recipes {
-			if recipe.ID == id {
-				recipes = append(recipes[:index], recipes[index+1:]...)
-				ctx.JSON(http.StatusOK, recipe)
-				return
-			}
-		}
-		ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{
+	func deleteRecipeHandler(c *gin.Context) {
+		id := c.Param("id")
+		objectId, _:= primitive.ObjectIDFromHex(id)
+		
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{
 			"error": "Recipe not found",
 		})
 	}
@@ -205,8 +250,8 @@ func main() {
 //   '200': []Recipe
 //   '404':
 //   description: Recipe not found
-	func searchRecipeHandler(ctx *gin.Context) {
-		tag := ctx.Query("tag")
+	func searchRecipeHandler(c *gin.Context) {
+		tag := c.Query("tag")
 		listOfRecipes := make([]Recipe, 0)
 
 		for _, recipe := range recipes {
@@ -222,11 +267,11 @@ func main() {
 			}
 		}
 		if len(listOfRecipes) < 1 {
-		ctx.AbortWithStatusJSON(http.StatusNotFound, gin.H{
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{
 			"error": "Recipe not found",
 		})
 		return
 		}
-		ctx.JSON(http.StatusOK, listOfRecipes)
+		c.JSON(http.StatusOK, listOfRecipes)
 	}
 	
